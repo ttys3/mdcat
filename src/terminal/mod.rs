@@ -17,7 +17,6 @@
 // Support modules for terminal writing.
 
 mod ansi;
-pub mod highlighting;
 mod size;
 
 #[cfg(feature = "iterm2")]

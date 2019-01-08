@@ -14,8 +14,24 @@
 
 //! Standard ANSI styling.
 
-use ansi_term::Style;
 use std::io::{Result, Write};
+use syntect::highlighting::Color;
+use syntect::highlighting::{FontStyle, Style};
+
+#[inline]
+fn to_colour(color: &Color) -> ansi_term::Colour {
+    ansi_term::Colour::RGB(color.r, color.g, color.b)
+}
+
+pub fn to_ansi(style: &Style) -> ansi_term::Style {
+    let mut ansi_style = ansi_term::Style::new();
+    ansi_style.foreground = Some(to_colour(&style.foreground));
+    ansi_style.background = Some(to_colour(&style.background));
+    ansi_style.is_bold = style.font_style.contains(FontStyle::BOLD);
+    ansi_style.is_italic = style.font_style.contains(FontStyle::ITALIC);
+    ansi_style.is_underline = style.font_style.contains(FontStyle::UNDERLINE);
+    ansi_style
+}
 
 /// Access to a terminal’s basic ANSI styling functionality.
 pub struct AnsiStyle;
@@ -28,6 +44,6 @@ impl AnsiStyle {
         style: &Style,
         text: V,
     ) -> Result<()> {
-        write!(write, "{}", style.paint(text.as_ref()))
+        write!(write, "{}", to_ansi(style).paint(text.as_ref()))
     }
 }
