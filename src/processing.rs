@@ -23,5 +23,16 @@
 //! along the events we try to retain the streaming interface of pulldown cmark.
 
 mod events;
+mod margins;
+
+use margins::*;
+use pulldown_cmark::Event;
 
 pub use self::events::*;
+
+pub fn process<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    inject_margins(lift_events(events))
+}

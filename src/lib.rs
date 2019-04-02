@@ -58,9 +58,13 @@ where
     I: Iterator<Item = Event<'a>>,
     W: Write,
 {
-    let pass_events = processing::lift_events(events);
-    for event in pass_events {
-        writeln!(writer, "{:?}", event)?;
+    use ansi_term::*;
+    use processing::*;
+    for event in process(events) {
+        match event {
+            PassEvent::Markdown(e) => writeln!(writer, "{:?}", e)?,
+            PassEvent::Print(e) => writeln!(writer, "{}", Colour::Green.paint(format!("{:?}", e)))?,
+        }
     }
     Ok(())
 }

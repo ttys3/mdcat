@@ -20,6 +20,8 @@ use syntect::parsing::Scope;
 pub enum PrintEvent<'a> {
     /// A text to print, with its highlighting scope.
     ScopedText(Vec<Scope>, CowStr<'a>),
+    /// A margin at the end of block elements
+    Margin,
 }
 
 /// An event resulting from a pass.
