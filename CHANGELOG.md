@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html
 ### Changed
 - Disable strike-through: Syntect does not support strike-through and many
   terminals do not render it properly (see [GH-73]).
+- Add `--ansi-only` flag to help.
 
 ### Fixed
 - Fail if incompatible arguments and options are given.

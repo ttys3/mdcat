@@ -185,9 +185,7 @@ Report issues to <https://github.com/lunaryorn/mdcat>.",
         .arg(
             Arg::with_name("ansi_only")
                 .long("ansi-only")
-                .help("Limit to standard ANSI formatting")
-                .conflicts_with("no_colour")
-                .hidden(true)
+                .help("Use only standard ANSI-compatible formatting")
                 .group("style"),
         )
         .arg(
