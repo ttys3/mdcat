@@ -28,8 +28,8 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Style, Theme};
-use syntect::parsing::SyntaxSet;
+use syntect::highlighting::{Highlighter, Theme};
+use syntect::parsing::{Scope, SyntaxSet};
 
 mod resources;
 mod terminal;
@@ -152,19 +152,13 @@ struct OutputContext<'a, W: Write> {
 }
 
 #[derive(Debug)]
-struct StyleContext {
-    /// The current style
-    current: Style,
-    /// Previous styles.
-    ///
-    /// Holds previous styles; whenever we disable the current style we restore
-    /// the last one from this list.
-    previous: Vec<Style>,
-    /// What level of emphasis we are currently at.
-    ///
-    /// We use this information to switch between italic and upright text for
-    /// emphasis.
-    emphasis_level: usize,
+struct StyleContext<'a> {
+    /// The theme to use for highlighting
+    theme: &'a Theme,
+    /// The code highlighter wrapping the `theme`.
+    highlighter: Highlighter<'a>,
+    /// The current scopes.
+    scopes: Vec<Scope>,
 }
 
 #[derive(Debug)]
@@ -195,8 +189,6 @@ struct LinkContext<'a> {
 struct CodeContext<'a> {
     /// Available syntaxes
     syntax_set: SyntaxSet,
-    /// The theme to use for highlighting
-    theme: &'a Theme,
     /// The current highlighter.
     ///
     /// If set assume we are in a code block and highlight all text with this
@@ -217,20 +209,20 @@ struct ImageContext {
 }
 
 /// Context for TTY rendering.
-struct Context<'io, 'c, 'l, W: Write> {
+struct Context<'io, 's, 'l, W: Write> {
     #[cfg(feature = "resources")]
     /// Context for input.
     resources: ResourceContext<'io>,
     /// Context for output.
     output: OutputContext<'io, W>,
     /// Context for styling
-    style: StyleContext,
+    style: StyleContext<'s>,
     /// Context for the current block.
     block: BlockContext,
     /// Context to keep track of links.
     links: LinkContext<'l>,
     /// Context for code blocks
-    code: CodeContext<'c>,
+    code: CodeContext<'s>,
     /// Context for images.
     image: ImageContext,
     /// The kind of the current list item.
@@ -239,7 +231,7 @@ struct Context<'io, 'c, 'l, W: Write> {
     list_item_kind: Vec<ListItemKind>,
 }
 
-impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
+impl<'io, 's, 'l, W: Write> Context<'io, 's, 'l, W> {
     fn new(
         writer: &'io mut W,
         capabilities: TerminalCapabilities,
@@ -247,8 +239,8 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
         base_dir: &'io Path,
         resource_access: ResourceAccess,
         syntax_set: SyntaxSet,
-        theme: &'c Theme,
-    ) -> Context<'io, 'c, 'l, W> {
+        theme: &'s Theme,
+    ) -> Context<'io, 's, 'l, W> {
         #[cfg(not(feature = "resources"))]
         {
             // Mark variables as used if resources are disabled to keep public
@@ -268,9 +260,9 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
                 capabilities,
             },
             style: StyleContext {
-                current: Style::new(),
-                previous: Vec::new(),
-                emphasis_level: 0,
+                theme: theme,
+                highlighter: Highlighter::new(theme),
+                scopes: vec![Scope::new("text.html.markdown").unwrap()],
             },
             block: BlockContext {
                 indent_level: 0,
@@ -285,7 +277,6 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
             },
             code: CodeContext {
                 syntax_set,
-                theme,
                 current_highlighter: None,
             },
             image: ImageContext {
@@ -347,53 +338,24 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
         .map_err(Into::into)
     }
 
-    /// Push a new style.
-    ///
-    /// Pass the current style to `f` and push the style it returns as the new
-    /// current style.
-    fn set_style(&mut self, style: Style) {
-        self.style.previous.push(self.style.current);
-        self.style.current = style;
+    fn push_scope(&mut self, s: &str) {
+        self.style.scopes.push(Scope::new(s).unwrap());
     }
 
-    /// Drop the current style, and restore the previous one.
-    fn drop_style(&mut self) {
-        match self.style.previous.pop() {
-            Some(old) => self.style.current = old,
-            None => self.style.current = Style::new(),
-        };
-    }
-
-    /// Write `text` with the given `style`.
-    fn write_styled<S: AsRef<str>>(&mut self, style: &Style, text: S) -> io::Result<()> {
-        match self.output.capabilities.style {
-            StyleCapability::None => write!(self.output.writer, "{}", text.as_ref())?,
-            StyleCapability::Ansi(ref ansi) => {
-                ansi.write_styled(self.output.writer, style, text)?
-            }
-        }
-        Ok(())
+    fn pop_scope(&mut self) {
+        self.style.scopes.pop();
     }
 
     /// Write `text` with current style.
     fn write_styled_current<S: AsRef<str>>(&mut self, text: S) -> io::Result<()> {
-        let style = self.style.current;
-        self.write_styled(&style, text)
-    }
-
-    /// Enable emphasis.
-    ///
-    /// Enable italic or upright text according to the current emphasis level.
-    fn enable_emphasis(&mut self) {
-        self.style.emphasis_level += 1;
-        let is_italic = self.style.emphasis_level % 2 == 1;
-        {
-            let new_style = Style {
-                is_italic,
-                ..self.style.current
-            };
-            self.set_style(new_style);
+        let style = self.style.highlighter.style_for_stack(&self.style.scopes);
+        match self.output.capabilities.style {
+            StyleCapability::None => write!(self.output.writer, "{}", text.as_ref())?,
+            StyleCapability::Ansi(ref ansi) => {
+                ansi.write_styled(self.output.writer, &style, text)?
+            }
         }
+        Ok(())
     }
 
     /// Add a link to the context.
@@ -416,12 +378,13 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
     fn write_pending_links(&mut self) -> Result<(), Error> {
         if !self.links.pending_links.is_empty() {
             self.newline()?;
-            let link_style = self.style.current.fg(Colour::Blue);
+            self.push_scope("meta.link.reference.def.markdown");
             while let Some(link) = self.links.pending_links.pop_front() {
                 let link_text = format!("[{}]: {} {}", link.index, link.destination, link.title);
-                self.write_styled(&link_style, link_text)?;
+                self.write_styled_current(link_text)?;
                 self.newline()?
             }
+            self.pop_scope();
         };
         Ok(())
     }
@@ -429,8 +392,9 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
     /// Write a simple border.
     fn write_border(&mut self) -> io::Result<()> {
         let separator = "\u{2500}".repeat(self.output.size.width.min(20));
-        let style = self.style.current.fg(Colour::Green);
-        self.write_styled(&style, separator)?;
+        self.push_scope("meta.separator.thematic-break.markdown");
+        self.write_styled_current(separator)?;
+        self.pop_scope();
         self.newline()
     }
 
@@ -444,7 +408,7 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
             if let StyleCapability::Ansi(ref ansi) = self.output.capabilities.style {
                 let regions = highlighter.highlight(&text, &self.code.syntax_set);
                 for (style, text) in regions {
-                    ansi.write_styled(self.terminal.writer, &style, text)?;
+                    ansi.write_styled(self.output.writer, &style, text)?;
                 }
                 wrote_highlighted = true;
             }
@@ -468,10 +432,10 @@ impl<'io, 'c, 'l, W: Write> Context<'io, 'c, 'l, W> {
 }
 
 /// Write a single `event` in the given context.
-fn write_event<'io, 'c, 'l, W: Write>(
-    mut ctx: Context<'io, 'c, 'l, W>,
+fn write_event<'io, 's, 'l, W: Write>(
+    mut ctx: Context<'io, 's, 'l, W>,
     event: Event<'l>,
-) -> Result<Context<'io, 'c, 'l, W>, Error> {
+) -> Result<Context<'io, 's, 'l, W>, Error> {
     match event {
         SoftBreak | HardBreak => {
             ctx.newline_and_indent()?;
@@ -493,17 +457,12 @@ fn write_event<'io, 'c, 'l, W: Write>(
         }
         Start(tag) => start_tag(ctx, tag),
         End(tag) => end_tag(ctx, tag),
-        Html(content) => {
-            let html_style = ctx.style.current.fg(Colour::Green);
-            for line in content.lines() {
-                ctx.write_styled(&html_style, line)?;
-                ctx.newline()?;
-            }
+        Html(_content) => {
+            // TODO: Highlight HTML as code
             Ok(ctx)
         }
-        InlineHtml(tag) => {
-            let style = ctx.style.current.fg(Colour::Green);
-            ctx.write_styled(&style, tag)?;
+        InlineHtml(_tag) => {
+            // TODO: Highlight HTML as code
             Ok(ctx)
         }
         FootnoteReference(_) => panic!("mdcat does not support footnotes"),
@@ -511,18 +470,21 @@ fn write_event<'io, 'c, 'l, W: Write>(
 }
 
 /// Write the start of a `tag` in the given context.
-fn start_tag<'io, 'c, 'l, W: Write>(
-    mut ctx: Context<'io, 'c, 'l, W>,
+fn start_tag<'io, 's, 'l, W: Write>(
+    mut ctx: Context<'io, 's, 'l, W>,
     tag: Tag<'l>,
-) -> Result<Context<'io, 'c, 'l, W>, Error> {
+) -> Result<Context<'io, 's, 'l, W>, Error> {
     match tag {
         HtmlBlock => ctx.newline()?,
-        Paragraph => ctx.start_inline_text()?,
+        Paragraph => {
+            ctx.push_scope("meta.paragraph.markdown");
+            ctx.start_inline_text()?
+        }
         Rule => {
             ctx.start_inline_text()?;
             let rule = "\u{2550}".repeat(ctx.output.size.width as usize);
-            let style = ctx.style.current.fg(Colour::Green);
-            ctx.write_styled(&style, rule)?
+            ctx.push_scope("meta.separator.thematic-break.markdown");
+            ctx.write_styled_current(rule)?;
         }
         Header(level) => {
             // Before we start a new header, write all pending links to keep
@@ -530,15 +492,13 @@ fn start_tag<'io, 'c, 'l, W: Write>(
             ctx.write_pending_links()?;
             ctx.start_inline_text()?;
             ctx.set_mark_if_supported()?;
-            ctx.set_style(Style::new().fg(Colour::Blue).bold());
-            ctx.write_styled_current("\u{2504}".repeat(level as usize))?
+            ctx.push_scope("markup.heading.markdown");
+            ctx.write_styled_current("\u{2504}".repeat(level as usize))?;
         }
         BlockQuote => {
             ctx.block.indent_level += 4;
             ctx.start_inline_text()?;
-            // Make emphasis style and add green colour.
-            ctx.enable_emphasis();
-            ctx.style.current = ctx.style.current.fg(Colour::Green);
+            ctx.push_scope("markup.quote.markdown");
         }
         CodeBlock(name) => {
             ctx.start_inline_text()?;
@@ -550,7 +510,7 @@ fn start_tag<'io, 'c, 'l, W: Write>(
                 ctx.code
                     .syntax_set
                     .find_syntax_by_token(&name)
-                    .map(|syntax| HighlightLines::new(syntax, ctx.code.theme))
+                    .map(|syntax| HighlightLines::new(syntax, ctx.style.theme))
             };
             if ctx.code.current_highlighter.is_none() {
                 // If we found no highlighter (code block had no language or
@@ -560,8 +520,7 @@ fn start_tag<'io, 'c, 'l, W: Write>(
                 // If we have a highlighter we set no style at all because
                 // we pass the entire block contents through the highlighter
                 // and directly write the result as ANSI.
-                let style = ctx.style.current.fg(Colour::Yellow);
-                ctx.set_style(style);
+                ctx.push_scope("markup.raw.block.markdown");
             }
         }
         List(kind) => {
@@ -590,20 +549,17 @@ fn start_tag<'io, 'c, 'l, W: Write>(
         }
         FootnoteDefinition(_) => panic!("mdcat does not support footnotes"),
         Table(_) | TableHead | TableRow | TableCell => panic!("mdcat does not support tables"),
-        Strikethrough => {
-            let style = ctx.style.current.strikethrough();
-            ctx.set_style(style)
-        }
-        Emphasis => ctx.enable_emphasis(),
-        Strong => {
-            let style = ctx.style.current.bold();
-            ctx.set_style(style)
-        }
+        // This is just wishful thinking, since syntect doesn't support strikethrough in styles
+        // nor does syntects Markdown grammar.  It's got no effect however since we never enable
+        // strike through.
+        Strikethrough => ctx.push_scope("markup.strikethrough.markdown"),
+        Emphasis => ctx.push_scope("markup.italic.markdown"),
+        Strong => ctx.push_scope("markup.bold.markdown"),
         Code => {
-            let style = ctx.style.current.fg(Colour::Yellow);
-            ctx.set_style(style)
+            ctx.push_scope("markup.raw.inline.markdown");
         }
         Link(_, destination, _) => {
+            ctx.push_scope("meta.link.inline.description.markdown");
             // Do nothing if the terminal doesn’t support inline links of if `destination` is no
             // valid URL:  We will write a reference link when closing the link tag.
             match ctx.output.capabilities.links {
@@ -622,69 +578,80 @@ fn start_tag<'io, 'c, 'l, W: Write>(
                 }
             }
         }
-        Image(_, link, _title) => match ctx.output.capabilities.image {
-            #[cfg(feature = "terminology")]
-            ImageCapability::Terminology(ref terminology) => {
-                let access = ctx.resources.resource_access;
-                if let Some(url) = ctx
-                    .resources
-                    .resolve_reference(&link)
-                    .filter(|url| access.permits(url))
-                {
-                    terminology.write_inline_image(
-                        &mut ctx.output.writer,
-                        ctx.output.size,
-                        &url,
-                    )?;
-                    ctx.image.inline_image = true;
-                }
-            }
-            #[cfg(feature = "iterm2")]
-            ImageCapability::ITerm2(ref iterm2) => {
-                let access = ctx.resources.resource_access;
-                if let Some(url) = ctx
-                    .resources
-                    .resolve_reference(&link)
-                    .filter(|url| access.permits(url))
-                {
-                    if let Ok(contents) = iterm2.read_and_render(&url) {
-                        iterm2.write_inline_image(ctx.output.writer, url.as_str(), &contents)?;
+        Image(_, link, _title) => {
+            ctx.push_scope("meta.image.inline.markdown");
+            match ctx.output.capabilities.image {
+                #[cfg(feature = "terminology")]
+                ImageCapability::Terminology(ref terminology) => {
+                    let access = ctx.resources.resource_access;
+                    if let Some(url) = ctx
+                        .resources
+                        .resolve_reference(&link)
+                        .filter(|url| access.permits(url))
+                    {
+                        terminology.write_inline_image(
+                            &mut ctx.output.writer,
+                            ctx.output.size,
+                            &url,
+                        )?;
                         ctx.image.inline_image = true;
                     }
                 }
+                #[cfg(feature = "iterm2")]
+                ImageCapability::ITerm2(ref iterm2) => {
+                    let access = ctx.resources.resource_access;
+                    if let Some(url) = ctx
+                        .resources
+                        .resolve_reference(&link)
+                        .filter(|url| access.permits(url))
+                    {
+                        if let Ok(contents) = iterm2.read_and_render(&url) {
+                            iterm2.write_inline_image(
+                                ctx.output.writer,
+                                url.as_str(),
+                                &contents,
+                            )?;
+                            ctx.image.inline_image = true;
+                        }
+                    }
+                }
+                ImageCapability::None => {
+                    // Just to mark "link" as used
+                    let _ = link;
+                }
             }
-            ImageCapability::None => {
-                // Just to mark "link" as used
-                let _ = link;
-            }
-        },
+        }
     };
     Ok(ctx)
 }
 
 /// Write the end of a `tag` in the given context.
-fn end_tag<'io, 'c, 'l, W: Write>(
-    mut ctx: Context<'io, 'c, 'l, W>,
+fn end_tag<'io, 's, 'l, W: Write>(
+    mut ctx: Context<'io, 's, 'l, W>,
     tag: Tag<'l>,
-) -> Result<Context<'io, 'c, 'l, W>, Error> {
+) -> Result<Context<'io, 's, 'l, W>, Error> {
     match tag {
         HtmlBlock => {}
-        Paragraph => ctx.end_inline_text_with_margin()?,
-        Rule => ctx.end_inline_text_with_margin()?,
+        Paragraph => {
+            ctx.pop_scope();
+            ctx.end_inline_text_with_margin()?
+        }
+        Rule => {
+            ctx.pop_scope();
+            ctx.end_inline_text_with_margin()?
+        }
         Header(_) => {
-            ctx.drop_style();
+            ctx.pop_scope();
             ctx.end_inline_text_with_margin()?
         }
         BlockQuote => {
             ctx.block.indent_level -= 4;
-            // Drop emphasis and current style
-            ctx.style.emphasis_level -= 1;
-            ctx.drop_style();
+            ctx.pop_scope();
             ctx.end_inline_text_with_margin()?
         }
         CodeBlock(_) => {
             match ctx.code.current_highlighter {
-                None => ctx.drop_style(),
+                None => ctx.pop_scope(),
                 Some(_) => {
                     // If we had a highlighter we used `write_ansi` to write the
                     // entire highlighted block and so don't need to reset the
@@ -713,13 +680,11 @@ fn end_tag<'io, 'c, 'l, W: Write>(
             ctx.end_inline_text_with_margin()?
         }
         FootnoteDefinition(_) | Table(_) | TableHead | TableRow | TableCell => {}
-        Strikethrough => ctx.drop_style(),
-        Emphasis => {
-            ctx.drop_style();
-            ctx.style.emphasis_level -= 1;
+        Emphasis | Strikethrough | Strong | Code => {
+            ctx.pop_scope();
         }
-        Strong | Code => ctx.drop_style(),
         Link(_, destination, title) => {
+            ctx.pop_scope();
             if ctx.links.inside_inline_link {
                 match ctx.output.capabilities.links {
                     #[cfg(feature = "osc8_links")]
@@ -742,18 +707,21 @@ fn end_tag<'io, 'c, 'l, W: Write>(
                     _ => {
                         // Reference link
                         let index = ctx.add_link(destination, title);
-                        let style = ctx.style.current.fg(Colour::Blue);
-                        ctx.write_styled(&style, format!("[{}]", index))?
+                        ctx.push_scope("meta.link.reference.markdown");
+                        ctx.write_styled_current(format!("[{}]", index))?;
+                        ctx.pop_scope();
                     }
                 }
             }
         }
         Image(_, link, _) => {
+            ctx.pop_scope();
             if !ctx.image.inline_image {
                 // If we could not write an inline image, write the image link
                 // after the image title.
-                let style = ctx.style.current.fg(Colour::Blue);
-                ctx.write_styled(&style, format!(" ({})", link))?
+                ctx.push_scope("meta.image.inline.markdown");
+                ctx.write_styled_current(format!(" ({})", link))?;
+                ctx.pop_scope();
             }
             ctx.image.inline_image = false;
         }

@@ -25,6 +25,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::{stdin, stdout};
 use std::path::PathBuf;
+use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 
 use mdcat::{ResourceAccess, TerminalCapabilities, TerminalSize};
@@ -68,7 +69,7 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
             Ok(())
         } else {
             let syntax_set = SyntaxSet::load_defaults_newlines();
-            let theme = &ThemeSet::load_defaults().themes["OneHalfLight"];
+            let theme = &ThemeSet::load_defaults().themes["InspiredGitHub"];
             mdcat::push_tty(
                 &mut stdout(),
                 args.terminal_capabilities,
@@ -80,6 +81,7 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
                 &base_dir,
                 args.resource_access,
                 syntax_set,
+                theme,
             )?;
             Ok(())
         }
