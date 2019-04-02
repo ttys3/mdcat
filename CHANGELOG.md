@@ -9,6 +9,9 @@ This project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html
 - Disable strike-through: Syntect does not support strike-through and many
   terminals do not render it properly (see [GH-73]).
 
+### Fixed
+- Fail if incompatible arguments and options are given.
+
 ## [0.13.0] – 2019-03-30
 ### Added
 - Render task lists nicely (see [GH-72]).

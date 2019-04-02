@@ -162,16 +162,33 @@ Licensed under the Apache License, Version 2.0
 Report issues to <https://github.com/lunaryorn/mdcat>.",
         )
         .arg(
+            Arg::with_name("detect_only")
+                .long("detect-only")
+                .help("Only detect the terminal type and exit")
+                .hidden(true)
+                .group("operation"),
+        )
+        .arg(
             Arg::with_name("filename")
                 .help("The file to read.  If - read from standard input instead")
-                .default_value("-"),
+                .default_value("-")
+                .group("operation"),
         )
         .arg(
             Arg::with_name("no_colour")
                 .short("c")
                 .long("--no-colour")
                 .aliases(&["nocolour", "no-color", "nocolor"])
-                .help("Disable all colours and other styles."),
+                .help("Disable all colours and other styles.")
+                .group("style"),
+        )
+        .arg(
+            Arg::with_name("ansi_only")
+                .long("ansi-only")
+                .help("Limit to standard ANSI formatting")
+                .conflicts_with("no_colour")
+                .hidden(true)
+                .group("style"),
         )
         .arg(
             Arg::with_name("columns")
@@ -189,20 +206,8 @@ Report issues to <https://github.com/lunaryorn/mdcat>.",
             Arg::with_name("dump_events")
                 .long("dump-events")
                 .help("Dump Markdown parser events and exit")
-                .hidden(true),
-        )
-        .arg(
-            Arg::with_name("detect_only")
-                .long("detect-only")
-                .help("Only detect the terminal type and exit")
-                .hidden(true),
-        )
-        .arg(
-            Arg::with_name("ansi_only")
-                .long("ansi-only")
-                .help("Limit to standard ANSI formatting")
-                .conflicts_with("no_colour")
-                .hidden(true),
+                .hidden(true)
+                .group("style"),
         );
 
     let matches = app.get_matches();
