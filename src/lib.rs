@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![deny(warnings, missing_docs, clippy::all)]
+//#![deny(warnings, missing_docs, clippy::all)]
 
 //! Write markdown to TTYs.
 
@@ -32,6 +32,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+mod processing;
 mod resources;
 mod terminal;
 
@@ -46,6 +47,19 @@ where
     W: Write,
 {
     for event in events {
+        writeln!(writer, "{:?}", event)?;
+    }
+    Ok(())
+}
+
+/// Dump processing passes to a writer.
+pub fn dump_passes<'a, W, I>(writer: &mut W, events: I) -> Result<(), Error>
+where
+    I: Iterator<Item = Event<'a>>,
+    W: Write,
+{
+    let pass_events = processing::lift_events(events);
+    for event in pass_events {
         writeln!(writer, "{:?}", event)?;
     }
     Ok(())

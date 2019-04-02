@@ -63,26 +63,32 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
         options.insert(Options::ENABLE_STRIKETHROUGH);
         let parser = Parser::new_ext(&input, options);
 
-        if args.dump_events {
-            mdcat::dump_events(&mut std::io::stdout(), parser)?;
-            Ok(())
-        } else {
-            let syntax_set = SyntaxSet::load_defaults_newlines();
-            mdcat::push_tty(
-                &mut stdout(),
-                args.terminal_capabilities,
-                TerminalSize {
-                    width: args.columns,
-                    ..size
-                },
-                parser,
-                &base_dir,
-                args.resource_access,
-                syntax_set,
-            )?;
-            Ok(())
-        }
+        match args.dump {
+            Some(Dump::Passes) => mdcat::dump_passes(&mut std::io::stdout(), parser)?,
+            Some(Dump::Events) => mdcat::dump_events(&mut std::io::stdout(), parser)?,
+            None => {
+                let syntax_set = SyntaxSet::load_defaults_newlines();
+                mdcat::push_tty(
+                    &mut stdout(),
+                    args.terminal_capabilities,
+                    TerminalSize {
+                        width: args.columns,
+                        ..size
+                    },
+                    parser,
+                    &base_dir,
+                    args.resource_access,
+                    syntax_set,
+                )?;
+            }
+        };
+        Ok(())
     }
+}
+
+enum Dump {
+    Passes,
+    Events,
 }
 
 /// Represent command line arguments.
@@ -91,7 +97,7 @@ struct Arguments {
     terminal_capabilities: TerminalCapabilities,
     resource_access: ResourceAccess,
     columns: usize,
-    dump_events: bool,
+    dump: Option<Dump>,
     detect_only: bool,
 }
 
@@ -114,7 +120,13 @@ impl Arguments {
         }
 
         let filename = value_t!(matches, "filename", String)?;
-        let dump_events = matches.is_present("dump_events");
+        let dump = if matches.is_present("dump_events") {
+            Some(Dump::Events)
+        } else if matches.is_present("dump_passes") {
+            Some(Dump::Passes)
+        } else {
+            None
+        };
         let detect_only = matches.is_present("detect_only");
         let columns = value_t!(matches, "columns", usize)?;
         let resource_access = if matches.is_present("local_only") {
@@ -127,7 +139,7 @@ impl Arguments {
             filename,
             columns,
             resource_access,
-            dump_events,
+            dump,
             detect_only,
             terminal_capabilities,
         })
@@ -187,6 +199,12 @@ Report issues to <https://github.com/lunaryorn/mdcat>.",
             Arg::with_name("dump_events")
                 .long("dump-events")
                 .help("Dump Markdown parser events and exit")
+                .hidden(true),
+        )
+        .arg(
+            Arg::with_name("dump_passes")
+                .long("dump-passes")
+                .help("Dump internal processing passes and exit")
                 .hidden(true),
         )
         .arg(
