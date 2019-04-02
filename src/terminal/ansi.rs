@@ -23,10 +23,14 @@ fn to_colour(color: &Color) -> ansi_term::Colour {
     ansi_term::Colour::RGB(color.r, color.g, color.b)
 }
 
+/// Convert a highlighting style to an ANSI style for printing.
+///
+/// We deliberately ignore the background color: To make background colors look well we'd have to
+/// make them cover the whole line with filling spaces, etc. which gets really weird.  bat doesn't
+/// draw the background color either, and it's probably a good idea to follow their path here.
 pub fn to_ansi(style: &Style) -> ansi_term::Style {
     let mut ansi_style = ansi_term::Style::new();
     ansi_style.foreground = Some(to_colour(&style.foreground));
-    ansi_style.background = Some(to_colour(&style.background));
     ansi_style.is_bold = style.font_style.contains(FontStyle::BOLD);
     ansi_style.is_italic = style.font_style.contains(FontStyle::ITALIC);
     ansi_style.is_underline = style.font_style.contains(FontStyle::UNDERLINE);
