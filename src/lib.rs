@@ -69,6 +69,33 @@ where
     Ok(())
 }
 
+/// does not guarantee that output stays within the column limit.
+#[cfg(not(feature = "singlepass"))]
+pub fn push_tty<'a, 'e, W, I>(
+    writer: &'a mut W,
+    capabilities: TerminalCapabilities,
+    size: TerminalSize,
+    mut events: I,
+    base_dir: &'a Path,
+    resource_access: ResourceAccess,
+    syntax_set: SyntaxSet,
+) -> Result<(), Error>
+where
+    I: Iterator<Item = Event<'e>>,
+    W: Write,
+{
+    use render::PrintEvent::*;
+    use render::*;
+    for event in assert_fully_rendered(render(events)) {
+        match event {
+            StyledText(text, style) => write!(writer, "{}", style.paint(text.as_ref()))?,
+            Newline => write!(writer, "\n")?,
+            Margin => write!(writer, "\n")?,
+        }
+    }
+    Ok(())
+}
+
 /// Write markdown to a TTY.
 ///
 /// Iterate over Markdown AST `events`, format each event for TTY output and
@@ -76,6 +103,7 @@ where
 ///
 /// `push_tty` tries to limit output to the given number of TTY `columns` but
 /// does not guarantee that output stays within the column limit.
+#[cfg(feature = "singlepass")]
 pub fn push_tty<'a, 'e, W, I>(
     writer: &'a mut W,
     capabilities: TerminalCapabilities,

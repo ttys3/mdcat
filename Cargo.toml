@@ -15,6 +15,9 @@ edition = "2018"
 [features]
 default = ["vte50", "iterm2", "terminology", "remote_resources"]
 
+# TODO: Remove with legacy singlepass rendering
+singlepass = []
+
 resources = ["url"]
 remote_resources = ["reqwest", "resources"]
 
