@@ -22,17 +22,88 @@
 //! into print events.  Each pass runs as a lazy iterator; while we sometimes do need to drag state
 //! along the events we try to retain the streaming interface of pulldown cmark.
 
-mod events;
-mod margins;
+use pulldown_cmark::Event::*;
+use pulldown_cmark::Tag::*;
+use pulldown_cmark::{CowStr, Event};
 
-use margins::*;
-use pulldown_cmark::Event;
+/// An event for printing to TTY.
+#[derive(Debug)]
+pub enum PrintEvent<'a> {
+    /// A text to print.
+    PlainText(CowStr<'a>),
+    /// A margin at the end of block elements
+    Margin,
+}
 
-pub use self::events::*;
+/// An event resulting from a pass.
+///
+/// Either a raw Markdown event, or a print event.
+#[derive(Debug)]
+pub enum PassEvent<'a> {
+    /// A raw markdown event.
+    ///
+    /// Normally something a pass didn't touch.
+    Markdown(Event<'a>),
+    /// A event for printing to a TTY.
+    Print(PrintEvent<'a>),
+}
 
+use PassEvent::*;
+
+/// Lift raw markdown events into pass events.
+pub fn lift_events<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    events.map(PassEvent::Markdown)
+}
+
+/// Inject margins into a stream of events
+pub fn inject_margins<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    use PrintEvent::Margin;
+    events.flat_map(|e| match e {
+        Markdown(End(Paragraph)) => vec![e, Print(Margin)],
+        Markdown(End(BlockQuote)) => vec![e, Print(Margin)],
+        Markdown(End(List(_))) => vec![e, Print(Margin)],
+        Markdown(End(Header(_))) => vec![e, Print(Margin)],
+        Markdown(End(CodeBlock(_))) => vec![e, Print(Margin)],
+        Markdown(End(Rule)) => vec![e, Print(Margin)],
+        _ => vec![e],
+    })
+}
+
+pub fn text_to_plaintext<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.map(|e| match e {
+        Markdown(Text(s)) => Print(PrintEvent::PlainText(s)),
+        _ => e,
+    })
+}
+
+pub fn remove_inline_markup<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.filter(|e| match e {
+        Markdown(Start(t)) | Markdown(End(t)) => match t {
+            Strikethrough | Strong | Emphasis | Code => false,
+            _ => true,
+        },
+        _ => true,
+    })
+}
+
+/// Process Markdown events for printing.
+///
+/// Combines all passes in proper order.
 pub fn process<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    inject_margins(lift_events(events))
+    remove_inline_markup(text_to_plaintext(inject_margins(lift_events(events))))
 }
