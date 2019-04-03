@@ -88,7 +88,10 @@ where
     use render::*;
     for event in assert_fully_rendered(render(events)) {
         match event {
-            StyledText(text, style) => write!(writer, "{}", style.paint(text.as_ref()))?,
+            StyledText(text, style) => match capabilities.style {
+                StyleCapability::Ansi(ref ansi) => ansi.write_styled(writer, &style, text)?,
+                StyleCapability::None => write!(writer, "{}", text.as_ref())?,
+            },
             Newline => write!(writer, "\n")?,
             Margin => write!(writer, "\n")?,
         }
