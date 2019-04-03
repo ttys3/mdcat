@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Process markdown for TTY printing.
+//! Render markdown to TTY.
 //!
 //! This module and its submodule process a stream of Markdown events into a stream of what we call
 //! "print events" which turn Markdown into a line-oriented document for printing, and ultimately
 //! into a series of "style strings" which we can finally print to a TTY.
 //!
-//! Processing happens in multiple passes, each of which turns a certain kind of Markdown events
+//! Rendering happens in multiple passes, each of which turns a certain kind of Markdown events
 //! into print events.  Each pass runs as a lazy iterator; while we sometimes do need to drag state
 //! along the events we try to retain the streaming interface of pulldown cmark.
 
@@ -98,10 +98,10 @@ where
     })
 }
 
-/// Process Markdown events for printing.
+/// Render Markdown events into printing events.
 ///
 /// Combines all passes in proper order.
-pub fn process<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+pub fn render<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = Event<'a>>,
 {

@@ -32,7 +32,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-mod processing;
+mod render;
 mod resources;
 mod terminal;
 
@@ -52,15 +52,15 @@ where
     Ok(())
 }
 
-/// Dump processing passes to a writer.
+/// Dump rendering passes to a writer.
 pub fn dump_passes<'a, W, I>(writer: &mut W, events: I) -> Result<(), Error>
 where
     I: Iterator<Item = Event<'a>>,
     W: Write,
 {
     use ansi_term::*;
-    use processing::*;
-    for event in process(events) {
+    use render::*;
+    for event in render(events) {
         match event {
             PassEvent::Markdown(e) => writeln!(writer, "{:?}", e)?,
             PassEvent::Print(e) => writeln!(writer, "{}", Colour::Green.paint(format!("{:?}", e)))?,
