@@ -147,6 +147,17 @@ where
     })
 }
 
+/// Break lines, by replacing hard and soft breaks with newlines.
+pub fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.map(|e| match e {
+        Markdown(SoftBreak) | Markdown(HardBreak) => Print(PrintEvent::Newline),
+        _ => e,
+    })
+}
+
 /// Erase inline markup text assuming inline tags were fully rendered.
 pub fn remove_inline_markup<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
@@ -161,14 +172,17 @@ where
     })
 }
 
-/// Break lines, by replacing hard and soft breaks with newlines.
-pub fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+/// Erase block level markup assuming the block contents were fully rendered.
+pub fn remove_blocks<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
-    events.map(|e| match e {
-        Markdown(SoftBreak) | Markdown(HardBreak) => Print(PrintEvent::Newline),
-        _ => e,
+    events.filter(|e| match e {
+        Markdown(Start(t)) | Markdown(End(t)) => match t {
+            Paragraph => false,
+            _ => true,
+        },
+        _ => true,
     })
 }
 
@@ -190,7 +204,7 @@ pub fn render<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    break_lines(remove_inline_markup(style_text(inject_margins(
-        lift_events(events),
+    remove_blocks(remove_inline_markup(break_lines(style_text(
+        inject_margins(lift_events(events)),
     ))))
 }
