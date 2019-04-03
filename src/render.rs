@@ -22,6 +22,7 @@
 //! into print events.  Each pass runs as a lazy iterator; while we sometimes do need to drag state
 //! along the events we try to retain the streaming interface of pulldown cmark.
 
+use ansi_term::{Colour, Style};
 use pulldown_cmark::Event::*;
 use pulldown_cmark::Tag::*;
 use pulldown_cmark::{CowStr, Event};
@@ -29,9 +30,11 @@ use pulldown_cmark::{CowStr, Event};
 /// An event for printing to TTY.
 #[derive(Debug)]
 pub enum PrintEvent<'a> {
-    /// A text to print.
-    PlainText(CowStr<'a>),
-    /// A margin at the end of block elements
+    /// A text with some style.
+    StyledText(CowStr<'a>, Style),
+    /// A newline
+    Newline,
+    /// A margin, that is, an empty line, at the end of block elements
     Margin,
 }
 
@@ -75,16 +78,76 @@ where
     })
 }
 
-pub fn text_to_plaintext<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+/// Style all text.
+///
+/// Adds styles to all text where styles are appropriate, by replacing Markdown Text events with
+/// StyledText events.
+pub fn style_text<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
-    events.map(|e| match e {
-        Markdown(Text(s)) => Print(PrintEvent::PlainText(s)),
+    let mut previous_styles = Vec::new();
+    let mut current_style = Style::new();
+    let mut emphasis_level = 0;
+    events.map(move |e| match e {
+        Markdown(Start(ref tag)) => {
+            match tag {
+                Header(_) => {
+                    previous_styles.push(current_style);
+                    current_style = Style::new().fg(Colour::Blue).bold();
+                }
+                BlockQuote => {
+                    emphasis_level += 1;
+                    previous_styles.push(current_style);
+                    current_style = Style {
+                        is_italic: emphasis_level % 2 == 1,
+                        ..current_style
+                    }
+                    .fg(Colour::Green);
+                }
+                Strikethrough => {
+                    previous_styles.push(current_style);
+                    current_style = current_style.strikethrough();
+                }
+                Strong => {
+                    previous_styles.push(current_style);
+                    current_style = current_style.bold();
+                }
+                Code | CodeBlock(_) => {
+                    previous_styles.push(current_style);
+                    current_style = current_style.fg(Colour::Yellow);
+                }
+                Emphasis => {
+                    emphasis_level += 1;
+                    previous_styles.push(current_style);
+                    current_style = Style {
+                        is_italic: emphasis_level % 2 == 1,
+                        ..current_style
+                    }
+                }
+                _ => (),
+            };
+            e
+        }
+        Markdown(End(ref tag)) => {
+            match tag {
+                CodeBlock(_) | Header(_) | Strikethrough | Strong | Code => {
+                    current_style = previous_styles.pop().unwrap();
+                }
+                Emphasis | BlockQuote => {
+                    emphasis_level -= 1;
+                    current_style = previous_styles.pop().unwrap();
+                }
+                _ => (),
+            };
+            e
+        }
+        Markdown(Text(s)) => Print(PrintEvent::StyledText(s, current_style)),
         _ => e,
     })
 }
 
+/// Erase inline markup text assuming inline tags were fully rendered.
 pub fn remove_inline_markup<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
@@ -98,6 +161,28 @@ where
     })
 }
 
+/// Break lines, by replacing hard and soft breaks with newlines.
+pub fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.map(|e| match e {
+        Markdown(SoftBreak) | Markdown(HardBreak) => Print(PrintEvent::Newline),
+        _ => e,
+    })
+}
+
+/// Assert that markdown was fully rendered, unlifting the stream to print events.
+pub fn assert_fully_rendered<'a, I>(events: I) -> impl Iterator<Item = PrintEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.map(|e| match e {
+        Print(pe) => pe,
+        Markdown(me) => panic!("Unexpected markdown event after rendering: {:?}", me),
+    })
+}
+
 /// Render Markdown events into printing events.
 ///
 /// Combines all passes in proper order.
@@ -105,5 +190,7 @@ pub fn render<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    remove_inline_markup(text_to_plaintext(inject_margins(lift_events(events))))
+    break_lines(remove_inline_markup(style_text(inject_margins(
+        lift_events(events),
+    ))))
 }
