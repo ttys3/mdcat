@@ -78,6 +78,24 @@ where
     })
 }
 
+/// Add decorations to headers.
+pub fn decorate_headers<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    use PrintEvent::StyledText;
+    events.flat_map(|e| match e {
+        Markdown(Start(Header(level))) => vec![
+            Print(StyledText(
+                CowStr::Boxed("\u{2504}".repeat(level as usize).into_boxed_str()),
+                Style::new().fg(Colour::Blue).bold(),
+            )),
+            e,
+        ],
+        _ => vec![e],
+    })
+}
+
 /// Style all text.
 ///
 /// Adds styles to all text where styles are appropriate, by replacing Markdown Text events with
@@ -147,14 +165,19 @@ where
     })
 }
 
-/// Break lines, by replacing hard and soft breaks with newlines.
+/// Break lines.
+///
+/// Insert line breaks after block level elements, and replace hard and soft breaks with newlines.
 pub fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
-    events.map(|e| match e {
-        Markdown(SoftBreak) | Markdown(HardBreak) => Print(PrintEvent::Newline),
-        _ => e,
+    // TODO: Insert line breaks at the end of list items
+    events.flat_map(|e| match e {
+        Markdown(End(Header(_))) => vec![e, Print(PrintEvent::Newline)],
+        Markdown(End(Paragraph)) => vec![e, Print(PrintEvent::Newline)],
+        Markdown(SoftBreak) | Markdown(HardBreak) => vec![Print(PrintEvent::Newline)],
+        _ => vec![e],
     })
 }
 
@@ -180,6 +203,7 @@ where
     events.filter(|e| match e {
         Markdown(Start(t)) | Markdown(End(t)) => match t {
             Paragraph => false,
+            Header(_) => false,
             _ => true,
         },
         _ => true,
@@ -204,7 +228,7 @@ pub fn render<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    remove_blocks(remove_inline_markup(break_lines(style_text(
-        inject_margins(lift_events(events)),
+    remove_blocks(remove_inline_markup(break_lines(decorate_headers(
+        style_text(inject_margins(lift_events(events))),
     ))))
 }
