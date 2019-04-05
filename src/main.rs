@@ -63,11 +63,11 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
         options.insert(Options::ENABLE_STRIKETHROUGH);
         let parser = Parser::new_ext(&input, options);
 
+        let syntax_set = SyntaxSet::load_defaults_newlines();
         match args.dump {
-            Some(Dump::Passes) => mdcat::dump_passes(&mut std::io::stdout(), parser)?,
+            Some(Dump::Passes) => mdcat::dump_passes(&mut std::io::stdout(), parser, syntax_set)?,
             Some(Dump::Events) => mdcat::dump_events(&mut std::io::stdout(), parser)?,
             None => {
-                let syntax_set = SyntaxSet::load_defaults_newlines();
                 mdcat::push_tty(
                     &mut stdout(),
                     args.terminal_capabilities,

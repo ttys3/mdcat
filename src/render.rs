@@ -22,16 +22,36 @@
 //! into print events.  Each pass runs as a lazy iterator; while we sometimes do need to drag state
 //! along the events we try to retain the streaming interface of pulldown cmark.
 
+use super::highlighting;
 use ansi_term::{Colour, Style};
 use pulldown_cmark::Event::*;
 use pulldown_cmark::Tag::*;
 use pulldown_cmark::{CowStr, Event};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::Theme;
+use syntect::parsing::SyntaxSet;
+
+/// A ruler.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Ruler {
+    /// The character to draw the ruler with.
+    pub character: char,
+    /// The style of the ruler.
+    pub style: Style,
+    /// The max width.
+    ///
+    /// If none the ruler spans the entire width of the terminal.  If `width` exceeds the width
+    /// of the terminal the ruler cuts off at the end of the line.
+    pub width: Option<usize>,
+}
 
 /// An event for printing to TTY.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PrintEvent<'a> {
     /// A text with some style.
     StyledText(CowStr<'a>, Style),
+    /// A ruler.
+    Ruler(Ruler),
     /// A newline
     Newline,
 }
@@ -87,6 +107,48 @@ where
             )),
             e,
         ],
+        _ => vec![e],
+    })
+}
+
+/// Highlight code in code blocks.
+pub fn highlight_code<'a: 'd, 'b: 'd, 'c: 'd, 'd, I>(
+    events: I,
+    syntax_set: &'b SyntaxSet,
+    theme: &'c Theme,
+) -> impl Iterator<Item = PassEvent<'a>> + 'd
+where
+    I: Iterator<Item = PassEvent<'a>> + 'd,
+{
+    let mut current_highlighter = None;
+    let ruler = Ruler {
+        character: '\u{2500}',
+        style: Style::new().fg(Colour::Green),
+        width: Some(20),
+    };
+
+    events.flat_map(move |e| match e {
+        Markdown(Start(CodeBlock(ref language))) => {
+            if !language.is_empty() {
+                current_highlighter = syntax_set
+                    .find_syntax_by_token(&language)
+                    .map(|syntax| HighlightLines::new(syntax, theme));
+            }
+            vec![Print(PrintEvent::Ruler(ruler)), e]
+        }
+        Markdown(End(CodeBlock(_))) => {
+            current_highlighter = None;
+            vec![e, Print(PrintEvent::Ruler(ruler))]
+        }
+        Markdown(Text(s)) => match &mut current_highlighter {
+            None => vec![Markdown(Text(s))],
+            Some(highlight) => {
+                let regions = highlight.highlight(&s, &syntax_set);
+                highlighting::to_ansi(&regions)
+                    .map(|(style, s)| Print(PrintEvent::StyledText(CowStr::Boxed(s.into()), style)))
+                    .collect()
+            }
+        },
         _ => vec![e],
     })
 }
@@ -183,50 +245,28 @@ where
 {
     events.filter(|e| match e {
         Markdown(Start(t)) | Markdown(End(t)) => match t {
-            Header(_) | Paragraph | Strikethrough | Strong | Emphasis | Code => false,
+            CodeBlock(_) | Header(_) | Paragraph | Strikethrough | Strong | Emphasis | Code => {
+                false
+            }
             _ => true,
         },
         _ => true,
     })
 }
 
-/// Render Markdown events into printing events.
-///
-/// Combines all passes in proper order.
-pub struct Renderer<'a> {
-    passes: Box<Iterator<Item = PassEvent<'a>> + 'a>,
-}
-
-impl<'a> Renderer<'a> {
-    /// Create a renderer for the given markdown events.
-    pub fn new<I>(events: I) -> Renderer<'a>
-    where
-        I: Iterator<Item = Event<'a>> + 'a,
-    {
-        let passes = remove_processed_markdown(break_lines(decorate_headers(style_text(
+pub fn render<'a: 'd, 'b: 'd, 'c: 'd, 'd, I>(
+    events: I,
+    syntax_set: &'b SyntaxSet,
+    theme: &'c Theme,
+) -> Box<Iterator<Item = PassEvent<'a>> + 'd>
+where
+    I: Iterator<Item = Event<'a>> + 'd,
+{
+    let passes =
+        remove_processed_markdown(break_lines(decorate_headers(style_text(highlight_code(
             inject_margins(events.map(PassEvent::Markdown)),
-        ))));
-        Renderer {
-            passes: Box::new(passes),
-        }
-    }
-
-    /// Iterate over the raw passes.
-    pub fn raw(self) -> impl Iterator<Item = PassEvent<'a>> {
-        self.passes
-    }
-}
-
-impl<'a> Iterator for Renderer<'a> {
-    type Item = PrintEvent<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.passes.next().map(|e| match e {
-            Print(print_event) => print_event,
-            Markdown(markdown_event) => panic!(
-                "Unexpected markdown event after rendering: {:?}",
-                markdown_event
-            ),
-        })
-    }
+            syntax_set,
+            theme,
+        )))));
+    Box::new(passes)
 }

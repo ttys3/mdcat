@@ -53,14 +53,16 @@ where
 }
 
 /// Dump rendering passes to a writer.
-pub fn dump_passes<'a, W, I>(writer: &mut W, events: I) -> Result<(), Error>
+pub fn dump_passes<'a, W, I>(writer: &mut W, events: I, syntax_set: SyntaxSet) -> Result<(), Error>
 where
     I: Iterator<Item = Event<'a>> + 'a,
     W: Write,
 {
     use ansi_term::*;
     use render::*;
-    for event in Renderer::new(events).raw() {
+    let theme_set = ThemeSet::load_defaults();
+    let theme = &theme_set.themes["Solarized (dark)"];
+    for event in render(events, &syntax_set, theme) {
         match event {
             PassEvent::Markdown(e) => writeln!(writer, "{:?}", e)?,
             PassEvent::Print(e) => writeln!(writer, "{}", Colour::Green.paint(format!("{:?}", e)))?,
@@ -75,24 +77,42 @@ pub fn push_tty<'a, 'e, W, I>(
     writer: &'a mut W,
     capabilities: TerminalCapabilities,
     size: TerminalSize,
-    mut events: I,
+    events: I,
     base_dir: &'a Path,
     resource_access: ResourceAccess,
+    // TODO: Make this a reference
     syntax_set: SyntaxSet,
 ) -> Result<(), Error>
 where
     I: Iterator<Item = Event<'e>> + 'e,
     W: Write,
 {
+    use render::PassEvent::*;
     use render::PrintEvent::*;
     use render::*;
-    for event in Renderer::new(events) {
+    let theme = &ThemeSet::load_defaults().themes["Solarized (dark)"];
+    for event in render(events, &syntax_set, theme) {
         match event {
-            StyledText(text, style) => match capabilities.style {
-                StyleCapability::Ansi(ref ansi) => ansi.write_styled(writer, &style, text)?,
-                StyleCapability::None => write!(writer, "{}", text.as_ref())?,
+            Markdown(event) => panic!("Unexpected markdown event: {:?}", event),
+            Print(print_event) => match print_event {
+                Newline => writeln!(writer)?,
+                StyledText(text, style) => match capabilities.style {
+                    StyleCapability::Ansi(ref ansi) => ansi.write_styled(writer, &style, text)?,
+                    StyleCapability::None => write!(writer, "{}", text.as_ref())?,
+                },
+                Ruler(ruler) => {
+                    let width = ruler.width.unwrap_or(size.width).min(size.width);
+                    let mut buffer = [0; 4];
+                    let border = ruler.character.encode_utf8(&mut buffer).repeat(width);
+                    match capabilities.style {
+                        StyleCapability::Ansi(ref ansi) => {
+                            ansi.write_styled(writer, &ruler.style, border)?;
+                            writeln!(writer)?;
+                        }
+                        StyleCapability::None => writeln!(writer, "{}", border)?,
+                    }
+                }
             },
-            Newline => write!(writer, "\n")?,
         }
     }
     Ok(())
