@@ -94,6 +94,10 @@ impl RenderState {
     }
 }
 
+/// Start a header.
+///
+/// Write a header adornment for a header of the given `level` to the given `writer`, using styling
+/// `capability` if any.
 fn start_header<W: Write>(
     writer: &mut W,
     level: usize,
@@ -112,6 +116,12 @@ fn start_header<W: Write>(
     ))
 }
 
+/// Proess a single `event`.
+///
+/// Render the representation of `event` to the given `writer`, in the current `state`, using the
+/// given terminal `capabilities` for rendering.
+///
+/// Return the next rendering state.
 fn process_event<'a, W: Write>(
     writer: &mut W,
     state: RenderState,
