@@ -32,6 +32,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+mod render_machine;
 mod resources;
 mod terminal;
 
@@ -53,7 +54,26 @@ where
 
 /// Write markdown to a TTY.
 ///
-/// Iterate over Markdown AST `events`, format each event for TTY output and
+/// Iterate over markdown ast `events`, format each event for tty output and
+/// write the result to a `writer`.
+///
+/// Like `push_tty` but with a proper state machine under the hood.
+pub fn push_tty_stateful<'a, W, I>(
+    writer: &mut W,
+    capabilities: &TerminalCapabilities,
+    events: I,
+) -> Result<(), Error>
+where
+    I: Iterator<Item = Event<'a>>,
+    W: Write,
+{
+    render_machine::render(writer, events, capabilities)?;
+    Ok(())
+}
+
+/// Write markdown to a TTY.
+///
+/// Iterate over markdown ast `events`, format each event for tty output and
 /// write the result to a `writer`.
 ///
 /// `push_tty` tries to limit output to the given number of TTY `columns` but

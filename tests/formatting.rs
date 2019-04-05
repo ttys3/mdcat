@@ -47,16 +47,22 @@ fn format_ansi_to_html(markdown: &str) -> String {
         options.insert(Options::ENABLE_TASKLISTS);
         options.insert(Options::ENABLE_STRIKETHROUGH);
         let parser = Parser::new_ext(markdown, options);
-        mdcat::push_tty(
-            &mut child.stdin.unwrap(),
-            mdcat::TerminalCapabilities::ansi(),
-            size,
-            parser,
-            &wd,
-            mdcat::ResourceAccess::LocalOnly,
-            syntax_set,
-        )
-        .expect("Formatting failed")
+        let capabilities = mdcat::TerminalCapabilities::ansi();
+        if std::env::var_os("MDCAT_STATEFUL").is_some() {
+            mdcat::push_tty_stateful(&mut child.stdin.unwrap(), &capabilities, parser)
+                .expect("Formatting failed")
+        } else {
+            mdcat::push_tty(
+                &mut child.stdin.unwrap(),
+                capabilities,
+                size,
+                parser,
+                &wd,
+                mdcat::ResourceAccess::LocalOnly,
+                syntax_set,
+            )
+            .expect("Formatting failed")
+        }
     }
     let mut buffer = Vec::new();
     child

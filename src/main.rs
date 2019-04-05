@@ -68,18 +68,22 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
             Ok(())
         } else {
             let syntax_set = SyntaxSet::load_defaults_newlines();
-            mdcat::push_tty(
-                &mut stdout(),
-                args.terminal_capabilities,
-                TerminalSize {
-                    width: args.columns,
-                    ..size
-                },
-                parser,
-                &base_dir,
-                args.resource_access,
-                syntax_set,
-            )?;
+            if std::env::var_os("MDCAT_STATEFUL").is_some() {
+                mdcat::push_tty_stateful(&mut stdout(), &args.terminal_capabilities, parser)?;
+            } else {
+                mdcat::push_tty(
+                    &mut stdout(),
+                    args.terminal_capabilities,
+                    TerminalSize {
+                        width: args.columns,
+                        ..size
+                    },
+                    parser,
+                    &base_dir,
+                    args.resource_access,
+                    syntax_set,
+                )?;
+            }
             Ok(())
         }
     }
