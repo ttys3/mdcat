@@ -34,8 +34,6 @@ pub enum PrintEvent<'a> {
     StyledText(CowStr<'a>, Style),
     /// A newline
     Newline,
-    /// A margin, that is, an empty line, at the end of block elements
-    Margin,
 }
 
 /// An event resulting from a pass.
@@ -53,21 +51,26 @@ pub enum PassEvent<'a> {
 
 use PassEvent::*;
 
-/// Inject margins into a stream of events
+/// Inject margins at the start of certain blocks.
 fn inject_margins<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
-    use PrintEvent::Margin;
-    events.flat_map(|e| match e {
-        Markdown(End(Paragraph)) => vec![e, Print(Margin)],
-        Markdown(End(BlockQuote)) => vec![e, Print(Margin)],
-        Markdown(End(List(_))) => vec![e, Print(Margin)],
-        Markdown(End(Header(_))) => vec![e, Print(Margin)],
-        Markdown(End(CodeBlock(_))) => vec![e, Print(Margin)],
-        Markdown(End(Rule)) => vec![e, Print(Margin)],
-        _ => vec![e],
-    })
+    use PrintEvent::Newline;
+    events
+        .flat_map(|e| match e {
+            Markdown(Start(Paragraph)) => vec![Print(Newline), e],
+            Markdown(Start(BlockQuote)) => vec![Print(Newline), e],
+            Markdown(Start(List(_))) => vec![Print(Newline), e],
+            Markdown(Start(Header(_))) => vec![Print(Newline), e],
+            Markdown(Start(CodeBlock(_))) => vec![Print(Newline), e],
+            Markdown(Start(Rule)) => vec![Print(Newline), e],
+            _ => vec![e],
+        })
+        .skip_while(|e| match e {
+            Print(Newline) => true,
+            _ => false,
+        })
 }
 
 /// Add decorations to headers.

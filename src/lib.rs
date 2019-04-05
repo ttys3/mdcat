@@ -93,7 +93,6 @@ where
                 StyleCapability::None => write!(writer, "{}", text.as_ref())?,
             },
             Newline => write!(writer, "\n")?,
-            Margin => write!(writer, "\n")?,
         }
     }
     Ok(())
