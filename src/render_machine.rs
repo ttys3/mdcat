@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::terminal::StyleCapability;
 use crate::terminal::TerminalCapabilities;
 use ansi_term::{Colour, Style};
 use pulldown_cmark::Event;
@@ -93,9 +94,19 @@ impl RenderState {
     }
 }
 
-fn start_header<W: Write>(writer: &mut W, level: usize) -> Result<RenderState> {
+fn start_header<W: Write>(
+    writer: &mut W,
+    level: usize,
+    capability: &StyleCapability,
+) -> Result<RenderState> {
+    use crate::terminal::StyleCapability::Ansi;
+    let adornment = "\u{2504}".repeat(level);
     let style = Style::new().fg(Colour::Blue).bold();
-    write!(writer, "{}", style.paint("\u{2504}".repeat(level)))?;
+    if let Ansi(ansi) = capability {
+        ansi.write_styled(writer, &style, adornment)?;
+    } else {
+        write!(writer, "{}", adornment)?;
+    }
     Ok(RenderState::StyledInline(
         InlineStyle::default().push_style(style),
     ))
@@ -114,11 +125,13 @@ fn process_event<'a, W: Write>(
     // THE BIG DISPATCH
     match (state, event) {
         // Enter a header
-        (Initial, Start(Header(level))) => start_header(writer, level as usize),
+        (Initial, Start(Header(level))) => {
+            start_header(writer, level as usize, &capabilities.style)
+        }
         (TopLevel, Start(Header(level))) => {
             // Add a margin before the last block
             writeln!(writer)?;
-            start_header(writer, level as usize)
+            start_header(writer, level as usize, &capabilities.style)
         }
         // Enter a paragraph, either top-level or initial
         (Initial, Start(Paragraph)) => Ok(RenderState::styled_inline()),
