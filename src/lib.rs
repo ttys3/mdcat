@@ -55,12 +55,12 @@ where
 /// Dump rendering passes to a writer.
 pub fn dump_passes<'a, W, I>(writer: &mut W, events: I) -> Result<(), Error>
 where
-    I: Iterator<Item = Event<'a>>,
+    I: Iterator<Item = Event<'a>> + 'a,
     W: Write,
 {
     use ansi_term::*;
     use render::*;
-    for event in render(events) {
+    for event in Renderer::new(events).raw() {
         match event {
             PassEvent::Markdown(e) => writeln!(writer, "{:?}", e)?,
             PassEvent::Print(e) => writeln!(writer, "{}", Colour::Green.paint(format!("{:?}", e)))?,
@@ -81,12 +81,12 @@ pub fn push_tty<'a, 'e, W, I>(
     syntax_set: SyntaxSet,
 ) -> Result<(), Error>
 where
-    I: Iterator<Item = Event<'e>>,
+    I: Iterator<Item = Event<'e>> + 'e,
     W: Write,
 {
     use render::PrintEvent::*;
     use render::*;
-    for event in assert_fully_rendered(render(events)) {
+    for event in Renderer::new(events) {
         match event {
             StyledText(text, style) => match capabilities.style {
                 StyleCapability::Ansi(ref ansi) => ansi.write_styled(writer, &style, text)?,

@@ -53,16 +53,8 @@ pub enum PassEvent<'a> {
 
 use PassEvent::*;
 
-/// Lift raw markdown events into pass events.
-pub fn lift_events<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
-where
-    I: Iterator<Item = Event<'a>>,
-{
-    events.map(PassEvent::Markdown)
-}
-
 /// Inject margins into a stream of events
-pub fn inject_margins<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+fn inject_margins<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
@@ -79,7 +71,7 @@ where
 }
 
 /// Add decorations to headers.
-pub fn decorate_headers<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+fn decorate_headers<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
@@ -182,53 +174,56 @@ where
 }
 
 /// Erase inline markup text assuming inline tags were fully rendered.
-pub fn remove_inline_markup<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+pub fn remove_processed_markdown<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
     events.filter(|e| match e {
         Markdown(Start(t)) | Markdown(End(t)) => match t {
-            Strikethrough | Strong | Emphasis | Code => false,
+            Header(_) | Paragraph | Strikethrough | Strong | Emphasis | Code => false,
             _ => true,
         },
         _ => true,
-    })
-}
-
-/// Erase block level markup assuming the block contents were fully rendered.
-pub fn remove_blocks<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
-where
-    I: Iterator<Item = PassEvent<'a>>,
-{
-    events.filter(|e| match e {
-        Markdown(Start(t)) | Markdown(End(t)) => match t {
-            Paragraph => false,
-            Header(_) => false,
-            _ => true,
-        },
-        _ => true,
-    })
-}
-
-/// Assert that markdown was fully rendered, unlifting the stream to print events.
-pub fn assert_fully_rendered<'a, I>(events: I) -> impl Iterator<Item = PrintEvent<'a>>
-where
-    I: Iterator<Item = PassEvent<'a>>,
-{
-    events.map(|e| match e {
-        Print(pe) => pe,
-        Markdown(me) => panic!("Unexpected markdown event after rendering: {:?}", me),
     })
 }
 
 /// Render Markdown events into printing events.
 ///
 /// Combines all passes in proper order.
-pub fn render<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
-where
-    I: Iterator<Item = Event<'a>>,
-{
-    remove_blocks(remove_inline_markup(break_lines(decorate_headers(
-        style_text(inject_margins(lift_events(events))),
-    ))))
+pub struct Renderer<'a> {
+    passes: Box<Iterator<Item = PassEvent<'a>> + 'a>,
+}
+
+impl<'a> Renderer<'a> {
+    /// Create a renderer for the given markdown events.
+    pub fn new<I>(events: I) -> Renderer<'a>
+    where
+        I: Iterator<Item = Event<'a>> + 'a,
+    {
+        let passes = remove_processed_markdown(break_lines(decorate_headers(style_text(
+            inject_margins(events.map(PassEvent::Markdown)),
+        ))));
+        Renderer {
+            passes: Box::new(passes),
+        }
+    }
+
+    /// Iterate over the raw passes.
+    pub fn raw(self) -> impl Iterator<Item = PassEvent<'a>> {
+        self.passes
+    }
+}
+
+impl<'a> Iterator for Renderer<'a> {
+    type Item = PrintEvent<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.passes.next().map(|e| match e {
+            Print(print_event) => print_event,
+            Markdown(markdown_event) => panic!(
+                "Unexpected markdown event after rendering: {:?}",
+                markdown_event
+            ),
+        })
+    }
 }
