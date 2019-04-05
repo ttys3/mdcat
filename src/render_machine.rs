@@ -88,12 +88,6 @@ enum RenderState {
     Error,
 }
 
-impl RenderState {
-    fn styled_inline() -> RenderState {
-        RenderState::StyledInline(Default::default())
-    }
-}
-
 /// Start a header.
 ///
 /// Write a header adornment for a header of the given `level` to the given `writer`, using styling
@@ -144,11 +138,11 @@ fn process_event<'a, W: Write>(
             start_header(writer, level as usize, &capabilities.style)
         }
         // Enter a paragraph, either top-level or initial
-        (Initial, Start(Paragraph)) => Ok(RenderState::styled_inline()),
+        (Initial, Start(Paragraph)) => Ok(StyledInline(InlineStyle::default())),
         (TopLevel, Start(Paragraph)) => {
             // Add a margin before the last block
             writeln!(writer)?;
-            Ok(RenderState::styled_inline())
+            Ok(StyledInline(InlineStyle::default()))
         }
         // Inline markup in line text starts
         (StyledInline(inline), Start(Strong)) => {
