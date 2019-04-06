@@ -69,7 +69,12 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
         } else {
             let syntax_set = SyntaxSet::load_defaults_newlines();
             if std::env::var_os("MDCAT_STATEFUL").is_some() {
-                mdcat::push_tty_stateful(&mut stdout(), &args.terminal_capabilities, parser)?;
+                mdcat::push_tty_stateful(
+                    &mut stdout(),
+                    &args.terminal_capabilities,
+                    parser,
+                    &syntax_set,
+                )?;
             } else {
                 mdcat::push_tty(
                     &mut stdout(),

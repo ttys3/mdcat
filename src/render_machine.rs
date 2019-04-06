@@ -15,9 +15,11 @@
 use crate::terminal::StyleCapability;
 use crate::terminal::TerminalCapabilities;
 use ansi_term::{Colour, Style};
-use pulldown_cmark::Event;
+use pulldown_cmark::{CowStr, Event};
 use std::io::prelude::*;
 use std::io::Result;
+use syntect::highlighting::{HighlightState, Highlighter, Theme};
+use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
 /// Style of inline text.
 #[derive(Default, PartialEq, Debug)]
@@ -75,8 +77,8 @@ impl InlineStyle {
 }
 
 /// State of the rendering state machine.
-#[derive(PartialEq, Debug)]
-enum RenderState {
+#[derive(Debug)]
+enum RenderState<'a> {
     /// The initial state, before anything is printed at all.
     ///
     /// Used to suppress leading line breaks.
@@ -85,6 +87,10 @@ enum RenderState {
     TopLevel,
     /// Styled inline text.
     StyledInline(InlineStyle),
+    /// A raw code block without any syntax highlighting.
+    RawCodeBlock,
+    /// A highlighted code block.
+    HighlightedCodeBlock(&'a SyntaxReference, ParseState, HighlightState),
     Error,
 }
 
@@ -92,11 +98,11 @@ enum RenderState {
 ///
 /// Write a header adornment for a header of the given `level` to the given `writer`, using styling
 /// `capability` if any.
-fn start_header<W: Write>(
+fn start_header<'a, W: Write>(
     writer: &mut W,
     level: usize,
     capability: &StyleCapability,
-) -> Result<RenderState> {
+) -> Result<RenderState<'a>> {
     use crate::terminal::StyleCapability::Ansi;
     let adornment = "\u{2504}".repeat(level);
     let style = Style::new().fg(Colour::Blue).bold();
@@ -110,18 +116,60 @@ fn start_header<W: Write>(
     ))
 }
 
+fn write_border<W: Write>(writer: &mut W, capability: &StyleCapability, size: usize) -> Result<()> {
+    use crate::terminal::StyleCapability::Ansi;
+    let separator = "\u{2500}".repeat(size);
+    if let Ansi(ansi) = capability {
+        let style = Style::new().fg(Colour::Green);
+        ansi.write_styled(writer, &style, separator)?;
+        writeln!(writer)
+    } else {
+        writeln!(writer, "{}", separator)
+    }
+}
+
+fn start_codeblock<'a, W: Write>(
+    writer: &mut W,
+    language: CowStr,
+    style: &StyleCapability,
+    syntax_set: &'a SyntaxSet,
+    theme: &'a Theme,
+) -> Result<RenderState<'a>> {
+    write_border(writer, style, 20)?;
+    let syntax = if language.is_empty() {
+        None
+    } else {
+        syntax_set.find_syntax_by_token(&language)
+    };
+    Ok(syntax
+        .map(|syntax| {
+            let hstate = HighlightState::new(&Highlighter::new(theme), ScopeStack::new());
+            let pstate = ParseState::new(syntax);
+            RenderState::HighlightedCodeBlock(syntax, pstate, hstate)
+        })
+        .unwrap_or_else(|| RenderState::RawCodeBlock))
+}
+
+fn end_codeblock<'a, W: Write>(writer: &mut W, style: &StyleCapability) -> Result<RenderState<'a>> {
+    write_border(writer, style, 20)?;
+    Ok(RenderState::TopLevel)
+}
+
 /// Proess a single `event`.
 ///
 /// Render the representation of `event` to the given `writer`, in the current `state`, using the
-/// given terminal `capabilities` for rendering.
+/// given terminal `capabilities` for rendering. `syntax_set` provides language grammars to
+/// highlight code in code blocks.
 ///
 /// Return the next rendering state.
 fn process_event<'a, W: Write>(
     writer: &mut W,
-    state: RenderState,
+    state: RenderState<'a>,
     event: Event<'a>,
     capabilities: &TerminalCapabilities,
-) -> Result<RenderState> {
+    syntax_set: &'a SyntaxSet,
+    theme: &'a Theme,
+) -> Result<RenderState<'a>> {
     use crate::terminal::StyleCapability::*;
     use pulldown_cmark::Event::*;
     use pulldown_cmark::Tag::*;
@@ -184,18 +232,42 @@ fn process_event<'a, W: Write>(
             writeln!(writer)?;
             Ok(RenderState::TopLevel)
         }
+        // Code blocks, either raw or with syntax highlighting
+        (Initial, Start(CodeBlock(language))) => {
+            start_codeblock(writer, language, &capabilities.style, syntax_set, theme)
+        }
+        (TopLevel, Start(CodeBlock(language))) => {
+            writeln!(writer)?;
+            start_codeblock(writer, language, &capabilities.style, syntax_set, theme)
+        }
+        (RawCodeBlock, Text(s)) => {
+            use crate::terminal::StyleCapability::Ansi;
+            if let Ansi(ansi) = &capabilities.style {
+                ansi.write_styled(writer, &Style::new().fg(Colour::Yellow), s)?;
+            } else {
+                write!(writer, "{}", s)?;
+            }
+            Ok(RawCodeBlock)
+        }
+        (HighlightedCodeBlock(..), Text(s)) => unimplemented!(),
+        (RawCodeBlock, End(CodeBlock(_))) => end_codeblock(writer, &capabilities.style),
+        (HighlightedCodeBlock(..), End(CodeBlock(_))) => end_codeblock(writer, &capabilities.style),
         _ => Ok(Error),
     }
 }
 
 /// Render Markdown to TTY.
 ///
-/// Render markdown events from `events` to the `writer`, assuming that the underlying terminal has
-/// the given `capabilities`.
+/// Render markdown `events` to a `writer`.
+///
+/// `capabilities` denotes what the terminal emulator behind the `writer` can do wrt to styling and
+/// other features.  `syntax_set` provides language grammars for highlighting code blocks.
 pub fn render<'a, I, W>(
     writer: &mut W,
     events: I,
     capabilities: &TerminalCapabilities,
+    syntax_set: &SyntaxSet,
+    theme: &Theme,
 ) -> Result<()>
 where
     W: Write,
@@ -204,7 +276,7 @@ where
     let mut state = RenderState::Initial;
     for event in events {
         let error_msg = format!("{:?} {:?}", &state, &event);
-        let next_state = process_event(writer, state, event, capabilities)?;
+        let next_state = process_event(writer, state, event, capabilities, syntax_set, theme)?;
         match next_state {
             RenderState::Error => panic!("Rendering errored: {}", error_msg),
             _ => state = next_state,

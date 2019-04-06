@@ -62,12 +62,14 @@ pub fn push_tty_stateful<'a, W, I>(
     writer: &mut W,
     capabilities: &TerminalCapabilities,
     events: I,
+    syntax_set: &SyntaxSet,
 ) -> Result<(), Error>
 where
     I: Iterator<Item = Event<'a>>,
     W: Write,
 {
-    render_machine::render(writer, events, capabilities)?;
+    let theme = &ThemeSet::load_defaults().themes["Solarized (dark)"];
+    render_machine::render(writer, events, capabilities, syntax_set, theme)?;
     Ok(())
 }
 
