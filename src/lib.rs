@@ -98,6 +98,7 @@ where
             Markdown(event) => panic!("Unexpected markdown event: {:?}", event),
             Print(print_event) => match print_event {
                 Newline => writeln!(writer)?,
+                Shift(n) => write!(writer, "{}", " ".repeat(n))?,
                 StyledText(text, style) => match capabilities.style {
                     StyleCapability::Ansi(ref ansi) => ansi.write_styled(writer, &style, text)?,
                     StyleCapability::None => write!(writer, "{}", text.as_ref())?,

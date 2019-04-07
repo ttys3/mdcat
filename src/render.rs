@@ -52,8 +52,10 @@ pub enum PrintEvent<'a> {
     StyledText(CowStr<'a>, Style),
     /// A ruler.
     Ruler(Ruler),
-    /// A newline
+    /// A newline.
     Newline,
+    /// Shift text by the given amount of spaces.
+    Shift(usize),
 }
 
 /// An event resulting from a pass.
@@ -80,7 +82,6 @@ where
     events
         .flat_map(|e| match e {
             Markdown(Start(Paragraph)) => vec![Print(Newline), e],
-            Markdown(Start(BlockQuote)) => vec![Print(Newline), e],
             Markdown(Start(List(_))) => vec![Print(Newline), e],
             Markdown(Start(Header(_))) => vec![Print(Newline), e],
             Markdown(Start(CodeBlock(_))) => vec![Print(Newline), e],
@@ -111,8 +112,12 @@ where
     })
 }
 
-/// Highlight code in code blocks.
-pub fn highlight_code<'a: 'c, 'b: 'c, 'c, I>(
+/// Highlight code in code blocks if possible.
+///
+/// Add syntax highlighting to text in code blocks with a known language and with no other
+/// stylying.  Use _before_ `style_text`, otherwise code blocks get their default styling and this
+/// function becomes a no-op.
+fn highlight_code<'a: 'c, 'b: 'c, 'c, I>(
     events: I,
     syntax_set: &'b SyntaxSet,
     theme: &'b Theme,
@@ -225,7 +230,7 @@ where
 /// Break lines.
 ///
 /// Insert line breaks after block level elements, and replace hard and soft breaks with newlines.
-pub fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+fn break_lines<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
@@ -238,16 +243,56 @@ where
     })
 }
 
+/// Shift text after new lines in certain blocks.
+fn shift_blocks<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    let mut current_shift_level = 0;
+    events.flat_map(move |e| match e {
+        Markdown(Start(BlockQuote)) => {
+            current_shift_level += 4;
+            vec![e]
+        }
+        Markdown(End(BlockQuote)) => {
+            current_shift_level -= 4;
+            vec![e]
+        }
+        Markdown(Start(Paragraph)) => vec![e, Print(PrintEvent::Shift(current_shift_level))],
+        Markdown(SoftBreak) | Markdown(HardBreak) if 0 < current_shift_level => {
+            vec![e, Print(PrintEvent::Shift(current_shift_level))]
+        }
+        _ => vec![e],
+    })
+}
+
+/// Insert rulers.
+fn insert_rulers<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+where
+    I: Iterator<Item = PassEvent<'a>>,
+{
+    events.flat_map(|e| match e {
+        Markdown(Start(Rule)) => vec![
+            e,
+            Print(PrintEvent::Ruler(Ruler {
+                character: '\u{2550}',
+                style: Style::new().fg(Colour::Green),
+                width: None,
+            })),
+        ],
+        _ => vec![e],
+    })
+}
+
 /// Erase inline markup text assuming inline tags were fully rendered.
-pub fn remove_processed_markdown<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
+fn remove_processed_markdown<'a, I>(events: I) -> impl Iterator<Item = PassEvent<'a>>
 where
     I: Iterator<Item = PassEvent<'a>>,
 {
     events.filter(|e| match e {
         Markdown(Start(t)) | Markdown(End(t)) => match t {
-            CodeBlock(_) | Header(_) | Paragraph | Strikethrough | Strong | Emphasis | Code => {
-                false
-            }
+            CodeBlock(_) | Header(_) | Rule | BlockQuote | Paragraph | Strikethrough | Strong
+            | Emphasis | Code => false,
             _ => true,
         },
         _ => true,
@@ -270,11 +315,12 @@ pub fn render<'a: 'c, 'b: 'c, 'c, I>(
 where
     I: Iterator<Item = Event<'a>> + 'c,
 {
-    let passes =
-        remove_processed_markdown(break_lines(decorate_headers(style_text(highlight_code(
+    let passes = remove_processed_markdown(break_lines(shift_blocks(decorate_headers(
+        insert_rulers(style_text(highlight_code(
             inject_margins(events.map(PassEvent::Markdown)),
             syntax_set,
             theme,
-        )))));
+        ))),
+    ))));
     Box::new(passes)
 }
