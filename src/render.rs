@@ -299,8 +299,6 @@ where
     })
 }
 
-// TODO: Return PrintEvent from `render` eventually.
-
 /// Render markdown `events`.
 ///
 /// Turn markdown events into print events for rendering to TTY.
@@ -315,6 +313,7 @@ pub fn render<'a: 'c, 'b: 'c, 'c, I>(
 where
     I: Iterator<Item = Event<'a>> + 'c,
 {
+    // TODO: Return PrintEvent from `render` eventually, i.e. inline remove_process_markdown here.
     let passes = remove_processed_markdown(break_lines(shift_blocks(decorate_headers(
         insert_rulers(style_text(highlight_code(
             inject_margins(events.map(PassEvent::Markdown)),
