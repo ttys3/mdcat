@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO: Re-enable these once finished
-//#![deny(warnings, missing_docs, clippy::all)]
-#![allow(dead_code, unused_variables)]
+#![deny(warnings, missing_docs, clippy::all)]
 
 //! Write markdown to TTYs.
 
@@ -73,17 +71,19 @@ where
     Ok(())
 }
 
+/// Write markdown to a TTY.
+///
+/// Iterate over Markdown AST `events`, format each event for TTY output and
+/// write the result to a `writer`.
+///
+/// `push_tty` tries to limit output to the given number of TTY `columns` but
 /// does not guarantee that output stays within the column limit.
-#[cfg(not(feature = "singlepass"))]
-pub fn push_tty<'a, 'e, W, I>(
+pub fn push_tty_multipass<'a, 'e, W, I>(
     writer: &'a mut W,
     capabilities: TerminalCapabilities,
     size: TerminalSize,
     events: I,
-    base_dir: &'a Path,
-    resource_access: ResourceAccess,
-    // TODO: Make this a reference
-    syntax_set: SyntaxSet,
+    syntax_set: &SyntaxSet,
 ) -> Result<(), Error>
 where
     I: Iterator<Item = Event<'e>> + 'e,
@@ -93,7 +93,7 @@ where
     use render::PrintEvent::*;
     use render::*;
     let theme = &ThemeSet::load_defaults().themes["Solarized (dark)"];
-    for event in render(events, &syntax_set, theme) {
+    for event in render(events, syntax_set, theme) {
         match event {
             Markdown(event) => panic!("Unexpected markdown event: {:?}", event),
             Print(print_event) => match print_event {
@@ -127,8 +127,7 @@ where
 ///
 /// `push_tty` tries to limit output to the given number of TTY `columns` but
 /// does not guarantee that output stays within the column limit.
-#[cfg(feature = "singlepass")]
-pub fn push_tty<'a, 'e, W, I>(
+pub fn push_tty_legacy<'a, 'e, W, I>(
     writer: &'a mut W,
     capabilities: TerminalCapabilities,
     size: TerminalSize,
@@ -834,23 +833,13 @@ mod tests {
 
     fn render_string(
         input: &str,
-        base_dir: &Path,
-        resource_access: ResourceAccess,
-        syntax_set: SyntaxSet,
+        syntax_set: &SyntaxSet,
         capabilities: TerminalCapabilities,
         size: TerminalSize,
     ) -> Result<Vec<u8>, Error> {
         let source = Parser::new(input);
         let mut sink = Vec::new();
-        push_tty(
-            &mut sink,
-            capabilities,
-            size,
-            source,
-            base_dir,
-            resource_access,
-            syntax_set,
-        )?;
+        push_tty_multipass(&mut sink, capabilities, size, source, syntax_set)?;
         Ok(sink)
     }
 
@@ -860,9 +849,7 @@ mod tests {
         let result = String::from_utf8(
             render_string(
                 "_lorem_ **ipsum** dolor **sit** _amet_",
-                Path::new("/"),
-                ResourceAccess::LocalOnly,
-                SyntaxSet::default(),
+                &SyntaxSet::default(),
                 TerminalCapabilities::none(),
                 TerminalSize::default(),
             )

@@ -68,18 +68,31 @@ fn process_arguments(size: TerminalSize, args: Arguments) -> Result<(), Box<dyn 
             Some(Dump::Passes) => mdcat::dump_passes(&mut std::io::stdout(), parser, syntax_set)?,
             Some(Dump::Events) => mdcat::dump_events(&mut std::io::stdout(), parser)?,
             None => {
-                mdcat::push_tty(
-                    &mut stdout(),
-                    args.terminal_capabilities,
-                    TerminalSize {
-                        width: args.columns,
-                        ..size
-                    },
-                    parser,
-                    &base_dir,
-                    args.resource_access,
-                    syntax_set,
-                )?;
+                if std::env::var_os("MDCAT_MULTIPASS").is_some() {
+                    mdcat::push_tty_multipass(
+                        &mut stdout(),
+                        args.terminal_capabilities,
+                        TerminalSize {
+                            width: args.columns,
+                            ..size
+                        },
+                        parser,
+                        &syntax_set,
+                    )?;
+                } else {
+                    mdcat::push_tty_legacy(
+                        &mut stdout(),
+                        args.terminal_capabilities,
+                        TerminalSize {
+                            width: args.columns,
+                            ..size
+                        },
+                        parser,
+                        &base_dir,
+                        args.resource_access,
+                        syntax_set,
+                    )?;
+                }
             }
         };
         Ok(())
