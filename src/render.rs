@@ -112,13 +112,13 @@ where
 }
 
 /// Highlight code in code blocks.
-pub fn highlight_code<'a: 'd, 'b: 'd, 'c: 'd, 'd, I>(
+pub fn highlight_code<'a: 'c, 'b: 'c, 'c, I>(
     events: I,
     syntax_set: &'b SyntaxSet,
-    theme: &'c Theme,
-) -> impl Iterator<Item = PassEvent<'a>> + 'd
+    theme: &'b Theme,
+) -> impl Iterator<Item = PassEvent<'a>> + 'c
 where
-    I: Iterator<Item = PassEvent<'a>> + 'd,
+    I: Iterator<Item = PassEvent<'a>> + 'c,
 {
     let mut current_highlighter = None;
     let ruler = Ruler {
@@ -254,13 +254,21 @@ where
     })
 }
 
-pub fn render<'a: 'd, 'b: 'd, 'c: 'd, 'd, I>(
+// TODO: Return PrintEvent from `render` eventually.
+
+/// Render markdown `events`.
+///
+/// Turn markdown events into print events for rendering to TTY.
+///
+/// `syntax_set` provides syntax definitions for highlighting code in code blocks.  `theme` is the
+/// highlighting theme.
+pub fn render<'a: 'c, 'b: 'c, 'c, I>(
     events: I,
     syntax_set: &'b SyntaxSet,
-    theme: &'c Theme,
-) -> Box<Iterator<Item = PassEvent<'a>> + 'd>
+    theme: &'b Theme,
+) -> Box<Iterator<Item = PassEvent<'a>> + 'c>
 where
-    I: Iterator<Item = Event<'a>> + 'd,
+    I: Iterator<Item = Event<'a>> + 'c,
 {
     let passes =
         remove_processed_markdown(break_lines(decorate_headers(style_text(highlight_code(
