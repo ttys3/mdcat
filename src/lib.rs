@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// TODO: Re-enable these once finished
 //#![deny(warnings, missing_docs, clippy::all)]
+#![allow(dead_code, unused_variables)]
 
 //! Write markdown to TTYs.
 
